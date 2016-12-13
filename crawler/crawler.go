@@ -1,4 +1,4 @@
-package main
+package crawler
 
 import (
 	"encoding/base64"
@@ -10,19 +10,32 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/zenja/pmp"
 )
 
-type Proxy struct {
-	IP   string
-	Port int
+type Crawler interface {
+	CrawlProxies() (chan pmp.Proxy, error)
 }
 
-func main() {
-	proxyDBNet()
+func NewUSProxyOrgCrawler() Crawler {
+	return &USProxyOrgCrawler{}
 }
 
-func crawlProxies(url string, reg *regexp.Regexp, matchHandler func([]string) (string, string, error)) (chan Proxy, error) {
-	proxies := make(chan Proxy)
+func NewGatherProxyComCrawler() Crawler {
+	return &GatherProxyComCrawler{}
+}
+
+func NewProxyListOrgCrawler() Crawler {
+	return &ProxyListOrgCrawler{}
+}
+
+func NewProxyDBNetCrawler() Crawler {
+	return &ProxyDBNetCrawler{}
+}
+
+func crawlProxies(url string, reg *regexp.Regexp, matchHandler func([]string) (string, string, error)) (chan pmp.Proxy, error) {
+	proxies := make(chan pmp.Proxy)
 	res, err := http.Get(url)
 	if err != nil {
 		close(proxies)
@@ -46,15 +59,15 @@ func crawlProxies(url string, reg *regexp.Regexp, matchHandler func([]string) (s
 				log.Printf("Failed to parse %d to a int port", portStr)
 				continue
 			}
-			proxies <- Proxy{IP: ip, Port: port}
+			proxies <- pmp.Proxy{IP: ip, Port: port}
 		}
 		close(proxies)
 	}()
 	return proxies, nil
 }
 
-func multiCrawlProxies(urls []string, reg *regexp.Regexp, matchHandler func([]string) (string, string, error)) (chan Proxy, error) {
-	proxies := make(chan Proxy)
+func multiCrawlProxies(urls []string, reg *regexp.Regexp, matchHandler func([]string) (string, string, error)) (chan pmp.Proxy, error) {
+	proxies := make(chan pmp.Proxy)
 	var wg sync.WaitGroup
 	wg.Add(len(urls))
 	go func(wg *sync.WaitGroup) {
@@ -77,23 +90,22 @@ func multiCrawlProxies(urls []string, reg *regexp.Regexp, matchHandler func([]st
 	return proxies, nil
 }
 
-func usProxyOrg() {
-	res, err := http.Get("https://www.us-proxy.org")
-	if err != nil {
-		log.Fatal(err)
-	}
-	content, err := ioutil.ReadAll(res.Body)
-	if err != nil {
-		log.Fatal(err)
-	}
-	html := string(content)
-	r := regexp.MustCompile(`<td>([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)</td><td>([0-9]+)</td>`)
-	for _, match := range r.FindAllStringSubmatch(html, -1) {
-		fmt.Printf("%s:%s\n", match[1], match[2])
-	}
+type USProxyOrgCrawler struct {
 }
 
-func gatherProxyCom() {
+func (c *USProxyOrgCrawler) CrawlProxies() (chan pmp.Proxy, error) {
+	url := "https://www.us-proxy.org"
+	reg := regexp.MustCompile(`<td>([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)</td><td>([0-9]+)</td>`)
+	matchHandler := func(match []string) (string, string, error) {
+		return match[1], match[2], nil
+	}
+	return crawlProxies(url, reg, matchHandler)
+}
+
+type GatherProxyComCrawler struct {
+}
+
+func (c *GatherProxyComCrawler) CrawlProxies() (chan pmp.Proxy, error) {
 	url := "http://www.gatherproxy.com"
 	reg := regexp.MustCompile(`"PROXY_IP":"([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)","PROXY_LAST_UPDATE":"[^"]+","PROXY_PORT":"([^"]+)"`)
 	matchHandler := func(match []string) (string, string, error) {
@@ -103,16 +115,13 @@ func gatherProxyCom() {
 		}
 		return match[1], strconv.Itoa(int(port)), nil
 	}
-	proxies, err := crawlProxies(url, reg, matchHandler)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for proxy := range proxies {
-		fmt.Printf("%s:%d\n", proxy.IP, proxy.Port)
-	}
+	return crawlProxies(url, reg, matchHandler)
 }
 
-func proxyListOrg() {
+type ProxyListOrgCrawler struct {
+}
+
+func (c *ProxyListOrgCrawler) CrawlProxies() (chan pmp.Proxy, error) {
 	var urls []string
 	for i := 1; i <= 10; i++ {
 		urls = append(urls, fmt.Sprintf("http://proxy-list.org/english/index.php?p=%d", i))
@@ -130,16 +139,13 @@ func proxyListOrg() {
 		}
 		return splits[0], splits[1], nil
 	}
-	proxies, err := multiCrawlProxies(urls, reg, matchHandler)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for proxy := range proxies {
-		fmt.Printf("%s:%d\n", proxy.IP, proxy.Port)
-	}
+	return multiCrawlProxies(urls, reg, matchHandler)
 }
 
-func proxyDBNet() {
+type ProxyDBNetCrawler struct {
+}
+
+func (c *ProxyDBNetCrawler) CrawlProxies() (chan pmp.Proxy, error) {
 	var urls []string
 	for i := 0; i < 10; i++ {
 		urls = append(urls, fmt.Sprintf("http://proxydb.net/?protocol=http&protocol=https&offset=%d", i*50))
@@ -149,11 +155,5 @@ func proxyDBNet() {
 		fmt.Printf("%s:%s\n", match[1], match[2])
 		return match[1], match[2], nil
 	}
-	proxies, err := multiCrawlProxies(urls, reg, matchHandler)
-	if err != nil {
-		log.Fatal(err)
-	}
-	for proxy := range proxies {
-		fmt.Printf("%s:%d\n", proxy.IP, proxy.Port)
-	}
+	return multiCrawlProxies(urls, reg, matchHandler)
 }
