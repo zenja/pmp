@@ -41,6 +41,7 @@ func crawlProxies(url string, reg *regexp.Regexp, matchHandler func([]string) (s
 		close(proxies)
 		return proxies, fmt.Errorf("failed to send Get request to %s: %s", url, err)
 	}
+	defer res.Body.Close()
 	content, err := ioutil.ReadAll(res.Body)
 	if err != nil {
 		close(proxies)
