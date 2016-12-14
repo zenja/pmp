@@ -153,7 +153,6 @@ func (c *ProxyDBNetCrawler) CrawlProxies() (chan pmp.Proxy, error) {
 	}
 	reg := regexp.MustCompile(`([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+):([0-9]+)`)
 	matchHandler := func(match []string) (string, string, error) {
-		fmt.Printf("%s:%s\n", match[1], match[2])
 		return match[1], match[2], nil
 	}
 	return multiCrawlProxies(urls, reg, matchHandler)
